@@ -18,7 +18,7 @@
     Get-ServerSharePermissionsReport.ps1 -Filter sql* -SearchBase 'dc=branch1,dc=business,dc=net' -ReportStyle FlatTable -HTMLFile SqlServerSharePermissions.html
     This command attempts to pull all systems in the 'branch1.business.net' domain that have a hostname starting with 'sql*'.  It uses the flat table format and writes the final HTML report to a file named SqlServerOfficeSharePermissions.html.
 .NOTES
-    Version 1.0 - Last Modified 03 AUG 2018
+    Version 1.01 - Last Modified 12 JUL 2024
     Main author: Vincent Drake
     Documentation and additional edits: Sam Pursglove
 #>
@@ -204,9 +204,7 @@ function Get-TargetServers {
         [String]$Filter
     )
     
-    $GCPort = 3268 
-    $globalCatalogServer = Get-ADDomainController -discover -service GlobalCatalog
-    Get-ADComputer -Filter $Filter -SearchBase $SearchBase -Server "$($globalCatalogServer):$GCPort" |
+    Get-ADComputer -Filter $Filter -SearchBase $SearchBase |
         Where-Object {
             Test-Connection -ComputerName ($_.dnsHostName,$_.Name)[$_.dnsHostName -eq $null] -Count 1 -ErrorAction SilentlyContinue
         }
