@@ -7,6 +7,8 @@
     Specify the hostname search term.  It can be an exact name or use a wildcard (*) to match multiple systems.
 .PARAMETER SearchBase
     Specify the distinguished name for the domain of interest to search (i.e., the domain where the hosts reside).
+.PARAMETER SystemList
+    The list of fully qualified domain systems to collect.
 .PARAMETER ReportStyle
     Specify if the final HTML report should have a nested table style (default) or a flat table sytle.
 .PARAMETER HTMLFile
@@ -15,36 +17,35 @@
     Get-ServerSharePermissionsReport.ps1 -Filter fileprint* -SearchBase 'dc=mycompany,dc=local'
     This command attempts to pull all systems in the 'mycompany.local' domain that have a hostname starting with 'fileprint*'.  It uses the default nesting table format and writes the final HTML report to the default file name of NTFS_ACL_Report.html.
 .EXAMPLE
+    Get-ServerSharePermissionsReport.ps1 -SystemList (Get-Content servers.txt)
+    This command attempts to pull all FQDN system names listed in the servers.txt file.  It performs no Active Directory lookups.  It uses the default nesting table format and writes the final HTML report to the default file name of NTFS_ACL_Report.html.
+.EXAMPLE
+    Get-ServerSharePermissionsReport.ps1 -SystemList 'svr1.domain.com','svr2.domain.com','svr3.domain.com'
+    This command attempts to pull all FQDN system names as defined on the commandline.  It performs no Active Directory lookups.  It uses the default nesting table format and writes the final HTML report to the default file name of NTFS_ACL_Report.html.
+.EXAMPLE
     Get-ServerSharePermissionsReport.ps1 -Filter sql* -SearchBase 'dc=branch1,dc=business,dc=net' -ReportStyle FlatTable -HTMLFile SqlServerSharePermissions.html
     This command attempts to pull all systems in the 'branch1.business.net' domain that have a hostname starting with 'sql*'.  It uses the flat table format and writes the final HTML report to a file named SqlServerOfficeSharePermissions.html.
 .NOTES
-    Version 1.01 - Last Modified 12 JUL 2024
+    Version 1.1 - Last Modified 06 March 2025
     Main author: Vincent Drake
     Documentation and additional edits: Sam Pursglove
 #>
 
 param 
 (
-    [Parameter(Position=0,
-               Mandatory=$true,
-               ValueFromPipeline=$false,
-               HelpMessage='Enter the hostname search term.  For instance, to identify servers that have a common hostname prefix of "file", using "file*" will attempt to pull the ACL of all shares on each host that match.')]
+    [Parameter(ParameterSetName='Domain', Mandatory=$True,  ValueFromPipeline=$False, HelpMessage='Enter the hostname search term.  For instance, to identify servers that have a common hostname prefix of "file", using "file*" will attempt to pull the ACL of all shares on each host that match.')]
     [string]$Filter,
     
-    [Parameter(Position=1,
-               Mandatory=$true,
-               ValueFromPipeline=$false,
-               HelpMessage="Enter the full distinguished name where the servers of interest reside (e.g., 'dc=hq,dc=company,dc=com')")]
+    [Parameter(ParameterSetName='Domain', Mandatory=$True, ValueFromPipeline=$False, HelpMessage="Enter the full distinguished name where the servers of interest reside (e.g. 'dc=hq,dc=company,dc=com')")]
     [string]$SearchBase,
+
+    [Parameter(ParameterSetName='List', Mandatory=$True, ValueFromPipeline=$False, HelpMessage="Enter the list of fully qualified domain name systems (e.g. 'svr1.domain.com','svr2.domain.com')")]
+    [string[]]$SystemList = '',
     
-    [Parameter(Mandatory=$false,
-               ValueFromPipeline=$false,
-               HelpMessage='Select the final report formatting style.')]
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false, HelpMessage='Select the final report formatting style.')]
     [ValidateSet('NestedTable','FlatTable')]$ReportStyle = 'NestedTable',
     
-    [Parameter(Mandatory=$false,
-               ValueFromPipeline=$false,
-               HelpMessage='Set the HTML final report name.')]
+    [Parameter(Mandatory=$false, ValueFromPipeline=$false, HelpMessage='Set the HTML final report name.')]
     [string]$HTMLFile = "NTFS_ACL_Report.html"
 )
 
@@ -204,7 +205,9 @@ function Get-TargetServers {
         [String]$Filter
     )
     
-    Get-ADComputer -Filter $Filter -SearchBase $SearchBase |
+    $GCPort = 3268 
+    $globalCatalogServer = Get-ADDomainController -discover -service GlobalCatalog
+    Get-ADComputer -Filter $Filter -SearchBase $SearchBase -Server "$($globalCatalogServer):$GCPort" |
         Where-Object {
             Test-Connection -ComputerName ($_.dnsHostName,$_.Name)[$_.dnsHostName -eq $null] -Count 1 -ErrorAction SilentlyContinue
         }
@@ -217,16 +220,29 @@ function Get-ServerSMBShares {
     begin{} 
     process{ 
         try { 
-            Get-WmiObject -Class win32_share -ComputerName $ADComputer.DNSHostName -ErrorAction Stop | 
-            Select-Object @( 
-                'Name', 
-                @{  Label="RemotePath" 
-                    expression={ 
-                        "\\$($ADComputer.DNSHostName)\$($_.name)" 
-                    } 
-                }, 
-                'Description' 
-            ) 
+            if($SystemList) {
+                Get-WmiObject -Class win32_share -ComputerName $ADComputer -ErrorAction Stop | 
+                Select-Object @( 
+                    'Name', 
+                    @{  Label="RemotePath" 
+                        expression={ 
+                            "\\$($ADComputer)\$($_.name)" 
+                        } 
+                    }, 
+                    'Description' 
+                )
+            } else {
+                Get-WmiObject -Class win32_share -ComputerName $ADComputer.DNSHostName -ErrorAction Stop | 
+                Select-Object @( 
+                    'Name', 
+                    @{  Label="RemotePath" 
+                        expression={ 
+                            "\\$($ADComputer.DNSHostName)\$($_.name)" 
+                        } 
+                    }, 
+                    'Description' 
+                )
+            }
         } catch { 
             Write-Host "Continuing ----------> Failed to get the WMI Object for $($ADComputer.name)" 
         }
@@ -251,7 +267,11 @@ function Generate-Report {
 
 $htmlFilePath = Resolve-Path (New-Item $HTMLFile -ItemType file -ErrorAction Stop)
 
-$postServers = Get-TargetServers -SearchBase $SearchBase -Filter "(Enabled -eq 'True') -and (Name -like '$Filter')"
+if($SystemList) {
+    $postServers = $SystemList
+} else {
+    $postServers = Get-TargetServers -SearchBase $SearchBase -Filter "(Enabled -eq 'True') -and (Name -like '$Filter')"
+}
 
 $smbServerShares = $postServers | Get-ServerSMBShares
 
