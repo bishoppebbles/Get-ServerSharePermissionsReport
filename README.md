@@ -7,11 +7,15 @@ This version was not forked as the script filename was changed.  It also require
 
 ## Running the script
 
-Here’s an example of using this script where all server hostnames start with the name `Contoso`:
+Here’s an example of using this script where all server hostnames start with the name `Contoso` (queries Active Directory):
  
     Get-ServerSharePermissionsReport.ps1 –Filter contoso* -SearchBase ‘ou=servers,dc=mycompany,dc=local’
- 
+
 Note that the `–SearchBase` option should be the full distinguished name (DN) where the servers of interest reside in your Active Directory (AD) environment.  It may still work even if you don’t do that but could be a slower.
+
+Here’s an example of using this script where all target server hostnames are read from a predefined list `servers.txt` (no Active Directory lookup):
+ 
+    Get-ServerSharePermissionsReport.ps1 –SystemList (Get-Content servers.txt)
 
 By default this script will produce a HTML file in the same directory where you ran it called `NTFS_ACL_Report.html`.  That’s what you want for your analysis. You can change this default file name using the `–HTMLFile` option.
 
